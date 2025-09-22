@@ -29,6 +29,41 @@ import (
 	"github.com/multigres/multigres/go/parser/ast"
 )
 
+// Lex implements the lexer interface for goyacc
+func (l *Lexer) Lex(lval *yySymType) int {
+	token := l.NextToken()
+	if token == nil {
+		return EOF // EOF = 0, exactly what yacc expects
+	}
+
+	// Set location and always populate both semantic value fields
+	//lval.location = token.Position
+	lval.str = token.Value.Str
+	lval.ival = token.Value.Ival
+
+	// Simply return the token type - no complex switch needed!
+	// All parser constants, keywords, operators, etc. work directly
+	return token.Type
+}
+
+// Error implements the error interface for goyacc
+func (l *Lexer) Error(s string) {
+	l.RecordError(fmt.Errorf("parse error at position %d: %s", l.GetPosition(), s))
+}
+
+// ParseSQL parses SQL input and returns the AST
+func ParseSQL(input string) ([]ast.Stmt, error) {
+	lexer := NewLexer(input)
+	yyParse(lexer)
+
+	if lexer.HasErrors() {
+		return nil, lexer.GetErrors()[0]
+	}
+
+	return lexer.GetParseTree(), nil
+}
+
+
 // Parser state for handling complex grammar constructs
 var parserState struct {
 	// Future parser state variables can be added here
@@ -69,16 +104,17 @@ type ImportQual struct {
 
 %}
 
-%union {
-	// Basic types
+%struct {
 	ival       int
 	str        string
+}
+
+%union {
 	keyword    string
 	bval       bool
 	byt        byte
 	rune       rune
 
-	// AST nodes
 	node       ast.Node
 	stmt       ast.Stmt
 	stmtList   []ast.Stmt
@@ -86,7 +122,6 @@ type ImportQual struct {
 	groupClause *ast.GroupClause
 	selectLimit *selectLimit
 
-	// Specific AST node types
 	into       *ast.IntoClause
 	onconflict *ast.OnConflictClause
 	windef     *ast.WindowDef
@@ -111,25 +146,25 @@ type ImportQual struct {
 	partboundspec *ast.PartitionBoundSpec
 	oncommit   ast.OnCommitAction
 	defelt     *ast.DefElem
-	target     *ast.ResTarget   // For select targets, insert columns
-	alias      *ast.Alias       // For table and column aliases
-	jtype      ast.JoinType     // For join type specifications
-	jexpr      *ast.JoinExpr    // For joined table expressions
-	keyaction  *ast.KeyAction   // For foreign key actions
-	keyactions *ast.KeyActions  // For foreign key action sets
-	funparam   *ast.FunctionParameter  // For function parameters
-	funparammode ast.FunctionParameterMode  // For parameter modes (IN/OUT/INOUT/VARIADIC)
-	vsetstmt   *ast.VariableSetStmt    // For SET/RESET statements
+	target     *ast.ResTarget   
+	alias      *ast.Alias       
+	jtype      ast.JoinType     
+	jexpr      *ast.JoinExpr    
+	keyaction  *ast.KeyAction   
+	keyactions *ast.KeyActions  
+	funparam   *ast.FunctionParameter  
+	funparammode ast.FunctionParameterMode  
+	vsetstmt   *ast.VariableSetStmt    
 	rolespec   *ast.RoleSpec
 	objwithargs *ast.ObjectWithArgs
 	statelem   *ast.StatsElem
-	accesspriv *ast.AccessPriv         // For privilege specifications
-	privtarget *PrivTarget             // For privilege target specifications
-	vacrel     *ast.VacuumRelation     // For vacuum relation specifications
-	importqual *ImportQual             // For import qualification specifications
-	importqualtype ast.ImportForeignSchemaType // For import qualification type
+	accesspriv *ast.AccessPriv         
+	privtarget *PrivTarget             
+	vacrel     *ast.VacuumRelation     
+	importqual *ImportQual             
+	importqualtype ast.ImportForeignSchemaType 
 
-	// Location tracking
+	
 	location   int
 }
 
@@ -15599,40 +15634,27 @@ opt_restart_seqs:
 		CONTINUE_P IDENTITY_P	{ $$ = false }
 	|	RESTART IDENTITY_P		{ $$ = true }
 	|	/* EMPTY */				{ $$ = false }
-		;
 
-%%
 
-// Lex implements the lexer interface for goyacc
-func (l *Lexer) Lex(lval *yySymType) int {
-	token := l.NextToken()
-	if token == nil {
-		return EOF // EOF = 0, exactly what yacc expects
-	}
 
-	// Set location and always populate both semantic value fields
-	lval.location = token.Position
-	lval.str = token.Value.Str
-	lval.ival = token.Value.Ival
 
-	// Simply return the token type - no complex switch needed!
-	// All parser constants, keywords, operators, etc. work directly
-	return token.Type
-}
 
-// Error implements the error interface for goyacc
-func (l *Lexer) Error(s string) {
-	l.RecordError(fmt.Errorf("parse error at position %d: %s", l.GetPosition(), s))
-}
 
-// ParseSQL parses SQL input and returns the AST
-func ParseSQL(input string) ([]ast.Stmt, error) {
-	lexer := NewLexer(input)
-	yyParse(lexer)
 
-	if lexer.HasErrors() {
-		return nil, lexer.GetErrors()[0]
-	}
 
-	return lexer.GetParseTree(), nil
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
