@@ -37,17 +37,53 @@ type PgBouncerInstance struct {
 	port      int
 }
 
+// PgBouncerOption configures a PgBouncerInstance at construction time.
+type PgBouncerOption func(*pgBouncerConfig)
+
+type pgBouncerConfig struct {
+	// resetQueryAlways adds `server_reset_query_always = 1` to pgbouncer.ini.
+	// Off by default (matches pgbouncer's own default), which means in
+	// transaction-pooling mode the reset query (DISCARD ALL) is NOT run
+	// when a backend is returned to the pool. That's correct for
+	// benchmarks (extra overhead, no behavioral benefit), but it's a trap
+	// for session-state demos: with low client contention, the same client
+	// often gets the same backend back after COMMIT and observes its temp
+	// table as if it survived. Enabling this forces DISCARD ALL on every
+	// release so the temp-table teardown is observable from a single
+	// client — the same behavior production hits randomly under churn.
+	resetQueryAlways bool
+}
+
+// WithServerResetQueryAlways enables `server_reset_query_always = 1` in the
+// generated pgbouncer.ini. Required for session-state demos to behave
+// deterministically; see the comment on pgBouncerConfig.resetQueryAlways.
+func WithServerResetQueryAlways() PgBouncerOption {
+	return func(c *pgBouncerConfig) {
+		c.resetQueryAlways = true
+	}
+}
+
 // NewPgBouncerInstance starts a pgbouncer instance pointing at the given PostgreSQL backend.
 // Returns nil, nil if pgbouncer is not installed (caller should skip pgbouncer benchmarks).
-func NewPgBouncerInstance(t *testing.T, backendHost string, backendPort int, user, password string) (*PgBouncerInstance, error) {
+func NewPgBouncerInstance(t *testing.T, backendHost string, backendPort int, user, password string, opts ...PgBouncerOption) (*PgBouncerInstance, error) {
 	t.Helper()
 
 	if !pgbouncerAvailable() {
 		return nil, nil //nolint:nilnil // nil,nil signals "not available, skip gracefully"
 	}
 
+	cfg := &pgBouncerConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
 	port := utils.GetFreePort(t)
 	configDir := t.TempDir()
+
+	resetQueryAlwaysLine := ""
+	if cfg.resetQueryAlways {
+		resetQueryAlwaysLine = "server_reset_query_always = 1\n"
+	}
 
 	// Write pgbouncer.ini
 	// Use scram-sha-256 auth to match PostgreSQL's default auth method.
@@ -60,7 +96,7 @@ listen_port = %d
 auth_type = scram-sha-256
 auth_file = %s/userlist.txt
 pool_mode = transaction
-max_client_conn = 200
+%smax_client_conn = 200
 default_pool_size = 20
 log_connections = 0
 log_disconnections = 0
@@ -69,7 +105,7 @@ pidfile = %s/pgbouncer.pid
 logfile = %s/pgbouncer.log
 unix_socket_dir = %s
 `, backendHost, backendPort, port,
-		configDir, user, configDir, configDir, configDir)
+		configDir, resetQueryAlwaysLine, user, configDir, configDir, configDir)
 
 	iniPath := filepath.Join(configDir, "pgbouncer.ini")
 	if err := os.WriteFile(iniPath, []byte(iniContent), 0o644); err != nil {
